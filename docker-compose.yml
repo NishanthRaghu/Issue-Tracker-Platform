@@ -1,0 +1,72 @@
+version: "3.8"
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: trackerpass
+      POSTGRES_DB: issuetracker
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: rabbit
+      RABBITMQ_DEFAULT_PASS: rabbit
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./backend
+    depends_on:
+      - postgres
+      - rabbitmq
+      - redis
+    environment:
+      DATABASE_URL: postgresql+psycopg2://tracker:trackerpass@postgres:5432/issuetracker
+      SECRET_KEY: supersecretkey
+      RABBITMQ_URL: amqp://rabbit:rabbit@rabbitmq:5672//
+      CELERY_BROKER_URL: amqp://rabbit:rabbit@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+
+  worker:
+    build: ./backend
+    command: ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "-Q", "default"]
+    depends_on:
+      - backend
+      - rabbitmq
+      - redis
+    environment:
+      DATABASE_URL: postgresql+psycopg2://tracker:trackerpass@postgres:5432/issuetracker
+      RABBITMQ_URL: amqp://rabbit:rabbit@rabbitmq:5672//
+      CELERY_BROKER_URL: amqp://rabbit:rabbit@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    volumes:
+      - ./backend/app:/app/app
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://backend:8000
+
+volumes:
+  pg-data:
